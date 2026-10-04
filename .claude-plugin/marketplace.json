@@ -1,0 +1,14 @@
+{
+  "name": "ai-review-local",
+  "description": "Local marketplace for the ai-review plugin",
+  "owner": {
+    "name": "Marcin Orlowski"
+  },
+  "plugins": [
+    {
+      "name": "ai-review",
+      "source": "./",
+      "description": "GitHub-style local code review of the agent's changes, with comments fed back to Claude."
+    }
+  ]
+}

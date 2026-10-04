@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Code Review</title>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github.min.css" media="(prefers-color-scheme: light)">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css" media="(prefers-color-scheme: dark)">
+  <link rel="stylesheet" href="/style.css">
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js" defer></script>
+  <script src="/app.js" defer></script>
+</head>
+<body>
+  <header class="topbar">
+    <div class="title">
+      <span class="repo" id="repo"></span>
+      <span class="branch" id="branch"></span>
+    </div>
+    <div class="controls">
+      <select id="scope" title="What to review"></select>
+      <select id="context" title="Context lines around changes">
+        <option value="3">3 lines context</option>
+        <option value="10">10 lines context</option>
+        <option value="25">25 lines context</option>
+        <option value="all">Full files</option>
+      </select>
+      <div class="seg" id="view" role="group" aria-label="Diff view">
+        <button type="button" data-view="unified">Unified</button>
+        <button type="button" data-view="split">Split</button>
+      </div>
+    </div>
+    <div class="stats" id="stats"></div>
+    <div class="finish-wrap">
+      <button type="button" id="finish" class="btn primary">Finish review <span class="badge" id="count">0</span></button>
+      <div id="finish-panel" class="popover" hidden>
+        <h3>Finish your review</h3>
+        <textarea id="general" rows="5" placeholder="Leave a general comment (markdown)"></textarea>
+        <label class="radio"><input type="radio" name="verdict" value="comment">
+          <span><b>Comment</b><small>Send feedback for Claude to address.</small></span></label>
+        <label class="radio"><input type="radio" name="verdict" value="approve">
+          <span><b>Approve</b><small>Changes look good; nothing blocking.</small></span></label>
+        <label class="radio"><input type="radio" name="verdict" value="request_changes">
+          <span><b>Request changes</b><small>Claude must address these before continuing.</small></span></label>
+        <p class="note" id="finish-note"></p>
+        <p class="error" id="finish-error"></p>
+        <div class="row">
+          <button type="button" id="close-review" class="btn">Close without submitting</button>
+          <button type="button" id="submit" class="btn primary">Submit review</button>
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <div class="banner" id="banner"></div>
+
+  <div class="layout">
+    <aside class="sidebar">
+      <input id="filter" type="search" placeholder="Filter changed files…">
+      <nav id="tree"></nav>
+    </aside>
+    <main id="main">
+      <div id="previous"></div>
+      <div id="files"><p class="empty">Loading diff…</p></div>
+    </main>
+  </div>
+
+  <div id="done" class="done" hidden></div>
+</body>
+</html>

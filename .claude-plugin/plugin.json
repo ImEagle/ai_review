@@ -1,0 +1,8 @@
+{
+  "name": "ai-review",
+  "version": "0.1.0",
+  "description": "GitHub-style local code review of the agent's changes. Comment on diff lines in the browser; the review is fed back to Claude to address.",
+  "author": { "name": "Marcin Orlowski" },
+  "license": "MIT",
+  "keywords": ["code-review", "diff", "review"]
+}
