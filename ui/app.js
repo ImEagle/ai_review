@@ -353,6 +353,7 @@ function renderFile(i) {
   else body += S.view === 'split' ? splitTable(f, comments, ed) : unifiedTable(f, comments, ed);
 
   el.innerHTML = fileHeader(f, i) + `<div class="file-body">${body}</div>`;
+  if (!selBtn.hidden && selTarget?.file === f.path) hideSelButton();
 
   if (ed) {
     const ta = $('.editor textarea', el);
@@ -691,6 +692,104 @@ $('#view').addEventListener('click', (e) => {
   S.view = b.dataset.view;
   store('ai-review.view', S.view);
   renderAll();
+});
+
+// ---------------------------------------------------------------------------
+// comment on selected code text
+
+const selBtn = document.createElement('button');
+selBtn.id = 'sel-comment';
+selBtn.className = 'sel-comment';
+selBtn.type = 'button';
+selBtn.hidden = true;
+document.body.appendChild(selBtn);
+let selTarget = null;
+let mouseDown = false;
+
+/** Maps the current text selection in a diff table to a line range, or null. */
+function selectionTarget() {
+  const sel = window.getSelection();
+  if (!sel || sel.isCollapsed || !sel.rangeCount) return null;
+  const node = sel.anchorNode;
+  const anchorEl = node && (node.nodeType === 1 ? node : node.parentElement);
+  const table = anchorEl?.closest('table.diff');
+  if (!table || anchorEl.closest('tr.thread-row')) return null;
+  const fileEl = table.closest('.file');
+  const f = fileEl && S.files[+fileEl.dataset.idx];
+  if (!f) return null;
+
+  const range = sel.getRangeAt(0);
+  let cells = $$('td.code[data-a]', table).filter((td) => td.dataset.a && range.intersectsNode(td));
+  if (!cells.length) return null;
+
+  let side;
+  if (table.classList.contains('split')) {
+    // Split view: keep to the column the selection started in.
+    const anchorTd = anchorEl.closest('td.code[data-a]') || cells[0];
+    const left = anchorTd.cellIndex < 2;
+    cells = cells.filter((td) => td.cellIndex < 2 === left);
+    side = left ? 'old' : 'new';
+    // Context lines on the left are addressed by their old number, which is fine.
+  } else {
+    side = cells.some((td) => td.dataset.a.startsWith('new:')) ? 'new' : 'old';
+  }
+  const nums = cells.map((td) => parseKey(td.dataset.a)).filter((k) => k.side === side).map((k) => k.n);
+  if (!nums.length) return null;
+  return { file: f.path, fileEl, side, start: Math.min(...nums), end: Math.max(...nums) };
+}
+
+function hideSelButton() {
+  selBtn.hidden = true;
+  selTarget = null;
+}
+
+function updateSelButton() {
+  selTarget = selectionTarget();
+  if (!selTarget || S.finished) return hideSelButton();
+  const rects = window.getSelection().getRangeAt(0).getClientRects();
+  const r = rects[rects.length - 1];
+  if (!r) return hideSelButton();
+  selBtn.textContent = `💬 Comment on ${rangeLabel(selTarget)}`;
+  selBtn.hidden = false;
+  const top = r.bottom + window.scrollY + 6;
+  const left = Math.min(r.right + window.scrollX, window.scrollX + document.documentElement.clientWidth - selBtn.offsetWidth - 16);
+  selBtn.style.top = `${top}px`;
+  selBtn.style.left = `${Math.max(window.scrollX + 8, left)}px`;
+}
+
+selBtn.addEventListener('mousedown', (e) => {
+  e.preventDefault(); // keep the selection alive through the click
+  e.stopPropagation();
+  const t = selTarget;
+  hideSelButton();
+  window.getSelection().removeAllRanges();
+  if (t) openEditor(t.file, t.side, t.start, t.end);
+});
+
+document.addEventListener('mousedown', (e) => {
+  if (e.target === selBtn) return;
+  mouseDown = true;
+  hideSelButton();
+  // Split view: restrict native text selection to the column the user started in.
+  $$('table.split[data-sel-side]').forEach((t) => delete t.dataset.selSide);
+  const td = e.target.closest('table.split td.code[data-a]');
+  if (td && !e.target.closest('.add-c')) td.closest('table').dataset.selSide = td.cellIndex < 2 ? 'left' : 'right';
+});
+
+document.addEventListener('mouseup', () => {
+  mouseDown = false;
+  if (!S.drag) setTimeout(updateSelButton, 0);
+});
+
+let selTimer = null;
+document.addEventListener('selectionchange', () => {
+  if (mouseDown) return;
+  clearTimeout(selTimer);
+  selTimer = setTimeout(updateSelButton, 120);
+});
+
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && !selBtn.hidden) hideSelButton();
 });
 
 // ---------------------------------------------------------------------------

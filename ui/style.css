@@ -290,3 +290,15 @@ textarea:focus, select:focus, input:focus { outline: 2px solid var(--accent); ou
 }
 .done h2 { margin: 0 0 8px; }
 .done p { color: var(--muted); }
+
+/* ---------- comment on selected text ---------- */
+table.split[data-sel-side=left] tr > td:nth-child(n+3),
+table.split[data-sel-side=right] tr > td:nth-child(-n+2) { user-select: none; }
+.add-c, tr.hunk td { user-select: none; }
+.sel-comment {
+  position: absolute; z-index: 40;
+  border: 0; border-radius: 999px; padding: 4px 12px;
+  background: var(--accent); color: #fff; font-size: 12px; font-weight: 600;
+  box-shadow: var(--shadow); cursor: pointer; white-space: nowrap;
+}
+.sel-comment:hover { filter: brightness(1.1); }

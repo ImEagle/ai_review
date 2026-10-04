@@ -1,9 +1,9 @@
 # ai-review
 
-A Claude Code plugin for reviewing the agent's changes the way you review a pull request on GitHub, then sending your comments back so the agent can address them.
+Skills for Codex and a Claude Code plugin for reviewing the agent's changes the way you review a pull request on GitHub, then sending your comments back so the agent can address them.
 
 - A file tree, plus **split** or **unified** diffs with syntax highlighting
-- **Inline comments** on one line or a range (drag, or shift-click, on the `+` or a line number), **file-level** comments, and a **general** comment
+- **Inline comments** on one line or a range: select code text and click the floating **Comment** button, or drag / shift-click the `+` or a line number. Also **file-level** comments and a **general** comment
 - **Suggestions**: a `suggestion` block pre-filled with the selected lines
 - **Viewed** checkboxes, a filter, and a choice of how much context to show (3, 10 or 25 lines, or full files)
 - Scope picker: uncommitted changes (the default, including untracked files), branch vs `main`/`master`, or the last N commits
@@ -14,6 +14,31 @@ Runs locally with no dependencies: Node ≥ 18 and git. The server listens only 
 
 ## Install
 
+### Codex
+
+Link the skills into your personal skills directory, keeping this checkout in place because the skills use its server and UI:
+
+```bash
+mkdir -p ~/.agents/skills
+ln -s /absolute/path/to/ai_review/skills/review ~/.agents/skills/review
+ln -s /absolute/path/to/ai_review/skills/review-auto ~/.agents/skills/review-auto
+```
+
+For repository-only discovery, use that repository's `.agents/skills` instead. Codex supports symlinked skills and `$skill-name` invocation; see the [official skill documentation](https://learn.chatgpt.com/docs/build-skills).
+
+In Codex, invoke:
+
+```text
+$review
+$review branch
+$review commits:3
+$review-auto on             # off | status
+```
+
+Codex shares a localhost URL for you to open, waits in the active command session, and addresses submitted feedback. Per-turn review runs the existing diff check before Codex finishes work while the skill instructions remain active in the conversation. It does not install a Codex runtime hook; the persisted repository flag alone does not enable review in another conversation. `$review-auto` is explicit-only, preserving the original skill's invocation policy.
+
+### Claude Code
+
 ```bash
 # try it for one session
 claude --plugin-dir /path/to/ai_review
@@ -23,7 +48,7 @@ claude --plugin-dir /path/to/ai_review
 /plugin install ai-review@ai-review-local
 ```
 
-## Use
+## Claude Code use
 
 ### On demand
 

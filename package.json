@@ -2,7 +2,7 @@
   "name": "ai-review",
   "version": "0.1.0",
   "private": true,
-  "description": "Claude Code plugin: GitHub-style local code review with comments fed back to the agent",
+  "description": "Codex skills and Claude Code plugin: GitHub-style local code review with comments fed back to the agent",
   "license": "MIT",
   "engines": { "node": ">=18" },
   "scripts": {
