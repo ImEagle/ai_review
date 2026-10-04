@@ -131,12 +131,20 @@ function saveDraft() {
 
 const viewedKey = (path) => `${S.scope}|${path}`;
 const scopeComments = () => S.comments.filter((c) => c.scope === S.scope);
-const agentComments = () => S.agents.comments.filter((c) => c.scope === S.scope);
-// Everything shown inline: the user's comments plus agent comments (rejected ones are shown dimmed).
-const fileComments = (path) => [...scopeComments(), ...agentComments()].filter((c) => c.file === path);
-// Comments that will be sent: everything except rejected agent comments.
-const liveCount = (path) => fileComments(path).filter((c) => c.status !== 'rejected').length;
-const sentAgentComments = () => S.agents.comments.filter((c) => c.status !== 'rejected');
+// Agent replies (parentId set) render inside their root comment, so only roots are anchored to lines.
+const agentRoots = () => S.agents.comments.filter((c) => c.scope === S.scope && !c.parentId);
+const repliesTo = (id) => S.agents.comments.filter((c) => c.parentId === id);
+// Everything shown inline: the user's comments plus agent threads (rejected ones are shown dimmed).
+const fileComments = (path) => [...scopeComments(), ...agentRoots()].filter((c) => c.file === path);
+// What will be sent: nothing rejected, and nothing inside a rejected thread (mirrors ReviewerStore.sendable).
+function sentAgentComments() {
+  const byId = new Map(S.agents.comments.map((c) => [c.id, c]));
+  return S.agents.comments.filter((c) => c.status !== 'rejected' && !(c.parentId && byId.get(c.parentId)?.status === 'rejected'));
+}
+const liveCount = (path) =>
+  scopeComments().filter((c) => c.file === path).length +
+  sentAgentComments().filter((c) => c.scope === S.scope && c.file === path).length;
+const STANCE = { agree: ['👍', 'agrees'], disagree: ['👎', 'disagrees'], info: ['ℹ️', 'adds info'] };
 const sentSummaries = () => S.agents.reviewers.filter((r) => r.summary && r.summary.trim() && r.summaryStatus !== 'rejected');
 
 function hue(name) {
@@ -470,15 +478,35 @@ function splitTable(f, comments, ed) {
   return html + '</table>';
 }
 
+function agentActions(st, threadRejected = false) {
+  if (threadRejected) return '<span class="state rejected">Not sent · thread rejected</span>';
+  return st === 'pending'
+    ? `<button class="btn sm ok" data-act="agent-accepted">✓ Accept</button><button class="btn sm no" data-act="agent-rejected">✕ Reject</button>`
+    : `<span class="state ${st}">${st === 'accepted' ? 'Accepted' : 'Rejected · not sent'}</span><button class="link" data-act="agent-pending">Undo</button>`;
+}
+
+function replyHtml(r, threadRejected) {
+  const st = r.status || 'pending';
+  const [icon, label] = STANCE[r.stance] || STANCE.info;
+  const re = r.inReplyTo && r.inReplyTo !== r.parentId ? S.agents.comments.find((c) => c.id === r.inReplyTo) : null;
+  return `<div class="comment agent reply ${st}${threadRejected ? ' dropped' : ''}" data-id="${esc(r.id)}" style="--h:${hue(r.author)}">
+    <div class="c-head">${avatar(r.author)}<span class="who">${esc(r.author)}</span>
+      <span class="stance s-${esc(r.stance || 'info')}">${icon} ${label}</span>${re ? `<span>re ${esc(re.author)}</span>` : ''}
+      <span class="spacer"></span>${agentActions(st, threadRejected)}</div>
+    <div class="c-body md">${md(r.body)}</div>
+  </div>`;
+}
+
 function agentCommentHtml(c, stale) {
   const st = c.status || 'pending';
-  const actions =
-    st === 'pending'
-      ? `<button class="btn sm ok" data-act="agent-accepted">✓ Accept</button><button class="btn sm no" data-act="agent-rejected">✕ Reject</button>`
-      : `<span class="state ${st}">${st === 'accepted' ? 'Accepted' : 'Rejected · not sent'}</span><button class="link" data-act="agent-pending">Undo</button>`;
+  const replies = repliesTo(c.id);
+  const thread = replies.length
+    ? `<div class="replies"><div class="replies-count">${replies.length} repl${replies.length === 1 ? 'y' : 'ies'}</div>${replies.map((r) => replyHtml(r, st === 'rejected')).join('')}</div>`
+    : '';
   return `<div class="comment agent ${st}" data-id="${esc(c.id)}" style="--h:${hue(c.author)}">
-    <div class="c-head">${avatar(c.author)}<span class="who">${esc(c.author)}</span><span class="tag">agent</span><span>${esc(rangeLabel(c))}</span><span class="spacer"></span>${actions}</div>
+    <div class="c-head">${avatar(c.author)}<span class="who">${esc(c.author)}</span><span class="tag">agent</span><span>${esc(rangeLabel(c))}</span><span class="spacer"></span>${agentActions(st)}</div>
     <div class="c-body md${stale ? ' stale' : ''}">${md(c.body)}</div>
+    ${thread}
   </div>`;
 }
 
@@ -841,6 +869,8 @@ function renderReviewers() {
   const el = $('#rv-list');
   const rows = S.agents.reviewers.map((r) => {
     const mine = S.agents.comments.filter((c) => c.author === r.name);
+    const nReplies = mine.filter((c) => c.parentId).length;
+    const nRoots = mine.length - nReplies;
     const cnt = (st) => mine.filter((c) => c.status === st).length;
     const pending = cnt('pending');
     const chip = r.verdict ? `<span class="chip v-${r.verdict}">${VERDICT_LABEL[r.verdict]}</span>` : '<span class="chip busy">reviewing…</span>';
@@ -855,7 +885,7 @@ function renderReviewers() {
       : '';
     return `<li class="rv" data-name="${esc(r.name)}">
       <div class="rv-head">${avatar(r.name)}<b>${esc(r.name)}</b>${chip}</div>
-      <div class="rv-counts">${mine.length} comment${mine.length === 1 ? '' : 's'} · ${cnt('accepted')} accepted · ${pending} pending · ${cnt('rejected')} rejected</div>
+      <div class="rv-counts">${nRoots} comment${nRoots === 1 ? '' : 's'}${nReplies ? ` · ${nReplies} repl${nReplies === 1 ? 'y' : 'ies'}` : ''} · ${cnt('accepted')} accepted · ${pending} pending · ${cnt('rejected')} rejected</div>
       ${pending || cnt('accepted') ? `<div class="rv-actions">${pending ? '<button class="btn sm ok" data-rv="bulk" data-st="accepted">Accept all pending</button>' : ''}<button class="btn sm no" data-rv="bulk" data-st="rejected">Reject all</button></div>` : ''}
       ${summary}
     </li>`;
@@ -956,10 +986,11 @@ const panel = $('#finish-panel');
 function updateFinishNote() {
   const other = S.comments.length - scopeComments().length;
   const ac = S.agents.comments;
-  const acc = ac.filter((c) => c.status === 'accepted').length;
-  const pend = ac.filter((c) => c.status === 'pending').length;
-  const rej = ac.filter((c) => c.status === 'rejected').length;
-  const agentNote = ac.length ? `Agent comments: ${acc + pend} will be sent (${acc} accepted, ${pend} pending), ${rej} rejected. ` : '';
+  const sent = sentAgentComments();
+  const acc = sent.filter((c) => c.status === 'accepted').length;
+  const pend = sent.filter((c) => c.status === 'pending').length;
+  const notSent = ac.length - sent.length;
+  const agentNote = ac.length ? `Agent comments & replies: ${sent.length} will be sent (${acc} accepted, ${pend} pending), ${notSent} not sent (rejected). ` : '';
   const unsaved = S.editor && S.editor.body.trim() ? 'You have an unsaved comment open; it will not be included until you add it. ' : '';
   $('#finish-note').textContent =
     unsaved + agentNote + (other > 0 ? `${other} of your comment(s) were made on a different scope and will be included.` : '');

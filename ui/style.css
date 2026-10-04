@@ -330,9 +330,9 @@ table.split[data-sel-side=right] tr > td:nth-child(-n+2) { user-select: none; }
 
 .comment.agent { border-left: 3px solid hsl(var(--h, 210) 55% 45%); }
 .comment.agent.accepted { border-color: var(--green); }
-.comment.agent.accepted .c-head { background: var(--add-bg); }
+.comment.agent.accepted > .c-head { background: var(--add-bg); }
 .comment.agent.rejected { opacity: .6; }
-.comment.agent.rejected .c-body { max-height: calc(1.5em + 16px); overflow: hidden; text-decoration: line-through; text-decoration-color: var(--muted); }
+.comment.agent.rejected > .c-body { max-height: calc(1.5em + 16px); overflow: hidden; text-decoration: line-through; text-decoration-color: var(--muted); }
 
 .reviewers { margin-bottom: 12px; padding-bottom: 12px; border-bottom: 1px solid var(--border-muted); }
 .reviewers h4 { margin: 0 0 6px; font-size: 12px; color: var(--muted); font-weight: 600; }
@@ -350,3 +350,16 @@ table.split[data-sel-side=right] tr > td:nth-child(-n+2) { user-select: none; }
 .invite input, .invite textarea { width: 100%; margin-top: 6px; font-size: 12px; }
 .invite textarea { font-family: var(--mono); resize: vertical; }
 .invite small { display: block; color: var(--muted); margin-top: 6px; }
+
+/* ---------- agent reply threads ---------- */
+.replies { margin: 0 12px 10px 28px; border-left: 2px solid var(--border-muted); padding-left: 10px; }
+.replies-count { font-size: 11px; color: var(--muted); margin-bottom: 6px; }
+.comment.reply { margin: 0 0 8px; border-left-width: 3px; }
+.comment.reply .c-head { padding: 4px 8px; }
+.comment.reply .c-body { padding: 6px 10px; font-size: 13px; }
+.comment.reply.dropped { opacity: .7; }
+.comment.agent.rejected .comment.reply { opacity: 1; } /* parent already dims the whole thread */
+.stance { font-size: 11px; border-radius: 10px; padding: 0 7px; background: var(--bg-inset); color: var(--muted); white-space: nowrap; }
+.stance.s-agree { background: var(--add-bg); color: var(--green); }
+.stance.s-disagree { background: var(--del-bg); color: var(--red); }
+.stance.s-info { background: var(--accent-bg); color: var(--accent); }

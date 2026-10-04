@@ -74,3 +74,17 @@ test('snippet containing backticks gets a longer fence', () => {
   const md = formatFeedback({ verdict: 'comment', comments: [{ file: 'a.md', side: 'new', start: 1, end: 1, snippet: ['```js'], body: 'hm' }] });
   assert.match(md, /````\n```js\n````/);
 });
+
+test('replies render under their root; orphans become roots', () => {
+  const md = formatFeedback({
+    verdict: 'comment',
+    comments: [
+      { id: 'r', author: 'Alice', file: 'a.js', side: 'new', start: 1, end: 1, snippet: ['x'], lang: 'javascript', body: 'Root.' },
+      { id: 'p', parentId: 'r', stance: 'agree', author: 'Bob', file: 'a.js', side: 'new', start: 1, end: 1, body: 'Yes.' },
+      { id: 'o', parentId: 'gone', stance: 'info', author: 'Bob', file: 'a.js', side: 'new', start: 2, end: 2, body: 'Orphan.' },
+    ],
+  });
+  assert.match(md, /2 comments, 1 reply/);
+  assert.match(md, /> Root\.\n\n↳ \*\*Bob\*\* \(agrees\):\n> Yes\./);
+  assert.match(md, /### L2 \(new\) · Bob\n> Orphan\./);
+});

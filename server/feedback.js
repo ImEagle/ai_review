@@ -14,6 +14,8 @@ function fence(text) {
   return '`'.repeat(longest + 1);
 }
 
+const STANCES = { agree: 'agrees', disagree: 'disagrees', info: 'adds context' };
+
 function lineLabel(c) {
   if (c.start == null) return 'File-level comment';
   const range = c.end != null && c.end !== c.start ? `L${c.start}–L${c.end}` : `L${c.start}`;
@@ -41,7 +43,12 @@ function formatFeedback(review, { scopeLabel = '' } = {}) {
   const verdict = review.verdict || 'comment';
   const comments = (review.comments || []).filter((c) => c.body && c.body.trim());
   const general = (review.general || '').trim();
-  const files = [...new Set(comments.map((c) => c.file))].sort();
+  // Replies hang under their root comment; a reply whose root was dropped is shown as a root.
+  const ids = new Set(comments.map((c) => c.id));
+  const isReply = (c) => c.parentId && ids.has(c.parentId);
+  const roots = comments.filter((c) => !isReply(c));
+  const replies = comments.filter(isReply);
+  const files = [...new Set(roots.map((c) => c.file))].sort();
   const reviewers = (review.reviewers || []).filter((r) => r.verdict || r.summary || comments.some((c) => c.author === r.name));
   const multi = comments.some((c) => c.author);
   const byWhom = (c) => (multi ? ` · ${c.author || 'user'}` : '');
@@ -49,7 +56,10 @@ function formatFeedback(review, { scopeLabel = '' } = {}) {
 
   const out = [];
   out.push(`# Code review — ${VERDICT_TITLES[verdict] || verdict.toUpperCase()}`);
-  const stats = [scopeLabel && `Scope: ${scopeLabel}`, `${comments.length} comment${comments.length === 1 ? '' : 's'}`, files.length && `${files.length} file${files.length === 1 ? '' : 's'}`].filter(Boolean);
+  const stats = [
+    scopeLabel && `Scope: ${scopeLabel}`,
+    `${roots.length} comment${roots.length === 1 ? '' : 's'}${replies.length ? `, ${replies.length} repl${replies.length === 1 ? 'y' : 'ies'}` : ''}`,
+    files.length && `${files.length} file${files.length === 1 ? '' : 's'}`].filter(Boolean);
   out.push(stats.join(' · '));
 
   if (general) {
@@ -59,16 +69,18 @@ function formatFeedback(review, { scopeLabel = '' } = {}) {
   if (reviewers.length) {
     out.push('', '## Agent reviewers');
     for (const r of reviewers) {
-      const n = comments.filter((c) => c.author === r.name).length;
+      const n = roots.filter((c) => c.author === r.name).length;
+      const k = replies.filter((c) => c.author === r.name).length;
       const v = r.verdict ? VERDICT_TITLES[r.verdict] || r.verdict : 'no verdict';
-      out.push(`- **${r.name}** — ${v}, ${n} comment${n === 1 ? '' : 's'} kept${r.summary ? ':' : ''}`);
+      const kept = `${n} comment${n === 1 ? '' : 's'}${k ? `, ${k} repl${k === 1 ? 'y' : 'ies'}` : ''} kept`;
+      out.push(`- **${r.name}** — ${v}, ${kept}${r.summary ? ':' : ''}`);
       if (r.summary) out.push(quote(r.summary).replace(/^/gm, '  '));
     }
   }
 
   for (const file of files) {
     out.push('', `## ${file}`);
-    const fileComments = comments
+    const fileComments = roots
       .filter((c) => c.file === file)
       .sort((a, b) => (a.start ?? -1) - (b.start ?? -1) || (a.side === 'old' ? -1 : 1));
     for (const c of fileComments) {
@@ -79,6 +91,9 @@ function formatFeedback(review, { scopeLabel = '' } = {}) {
         out.push(`${f}${c.lang || ''}`, code, f);
       }
       out.push(quote(c.body));
+      for (const r of replies.filter((x) => x.parentId === c.id)) {
+        out.push('', `↳ **${r.author || 'user'}** (${STANCES[r.stance] || 'reply'}):`, quote(r.body));
+      }
     }
   }
 
@@ -86,6 +101,9 @@ function formatFeedback(review, { scopeLabel = '' } = {}) {
   out.push('', '---');
   if (multi || summaries) {
     out.push('Comments and summaries by named agent reviewers were vetted by the user (rejected ones were removed); treat them all as the user\'s feedback.');
+  }
+  if (replies.length) {
+    out.push('"↳" replies are other reviewers\' context on the comment above them (agreeing, disagreeing or adding information); weigh them when addressing that comment.');
   }
   if (hasSuggestion) {
     out.push('`suggestion` blocks contain the exact replacement for the commented lines.');

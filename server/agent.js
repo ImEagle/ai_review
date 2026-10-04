@@ -16,7 +16,7 @@ const SELF = path.resolve(__filename);
 
 function parseArgs(argv) {
   const o = { _: [] };
-  const flags = new Set(['old', 'all', 'help']);
+  const flags = new Set(['old', 'all', 'help', 'newIssue']);
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (!a.startsWith('--')) {
@@ -104,14 +104,23 @@ RULES
 - Focus on: correctness bugs, edge cases, security, data loss, concurrency, error handling,
   API/contract breaks, missing tests, and clearly confusing code. Skip pure style nits
   unless they hide a bug. No praise-only comments.
-- Run "status --all" first to avoid duplicating what other reviewers already said.
+- Read "comments" before commenting: reply to other reviewers' points instead of repeating them.
 
 WORKFLOW
 1. Read the changes:
      ${base} diff
    Options: --context 20 (more surrounding lines), --scope working|branch|commits:N.
 
-2. Comment on lines (repeat as needed):
+2. Read what other reviewers already wrote (ids in [brackets]):
+     ${base} comments
+
+3. Reply to their comments where you agree, disagree (say why) or can add context:
+     ${base} reply --to a1b2c3d4 --stance disagree --body "The caller already validates this in api/client.ts:40"
+   Stances: agree | disagree | info (default). Never post a separate comment that repeats
+   another reviewer's point: reply to it instead. Replies reach the implementing agent
+   together with the comment they answer.
+
+4. Comment on NEW issues nobody raised yet (repeat as needed):
      ${base} comment --file src/app.ts --line 42 --body "Null check missing: user can be undefined here"
    Line range:           --line 42 --end 48
    Deleted ("-") lines:  add --old and use the OLD line number
@@ -126,12 +135,15 @@ for (let i = 0; i < items.length; i++) {
 EOF
 
    A \`\`\`suggestion block must contain the exact replacement for the commented line(s).
+   If another reviewer already commented on the same lines, "comment" refuses and shows
+   their comment: reply to it instead, or add --new-issue if yours is a different problem.
 
-3. Finish with your overall verdict (you can re-run it to update):
+5. Other reviewers may still be working: run "comments" again and reply to anything new.
+   Then finish with your overall verdict (you can re-run it to update):
      ${base} finish --verdict request_changes --summary "Two bugs in error handling; see comments."
    Verdicts: approve | comment | request_changes
 
-4. Check your comments and whether the user accepted them:
+6. Check your comments and whether the user accepted them:
      ${base} status        (add --all to include other reviewers)
 
 LINE NUMBERS
@@ -163,6 +175,30 @@ function formatDiff(res) {
         const mark = l.type === 'add' ? '+' : l.type === 'del' ? '-' : ' ';
         out.push(`${String(l.oldNo ?? '').padStart(5)} ${String(l.newNo ?? '').padStart(5)} ${mark} ${l.text}`);
       }
+    }
+    out.push('');
+  }
+  return out.join('\n');
+}
+
+const STANCE_LABEL = { agree: 'agrees', disagree: 'disagrees', info: 'adds info' };
+
+function indent(text, pad) {
+  return text.trim().split('\n').map((l) => pad + l).join('\n');
+}
+
+/** Every agent comment as a thread, with full bodies and ids to reply to. */
+function formatThreads(comments) {
+  const roots = comments.filter((c) => !c.parentId);
+  if (!roots.length) return 'No comments from agent reviewers yet.';
+  const out = [];
+  for (const r of roots) {
+    out.push(`[${r.id}] ${r.author} · ${r.file} ${rangeLabel(r)} · ${r.status}`);
+    out.push(indent(r.body, '    '));
+    for (const c of comments.filter((x) => x.parentId === r.id)) {
+      const to = c.inReplyTo && c.inReplyTo !== r.id ? ` re ${c.inReplyTo}` : '';
+      out.push(`    ↳ [${c.id}] ${c.author} (${STANCE_LABEL[c.stance] || c.stance}${to}) · ${c.status}`);
+      out.push(indent(c.body, '        '));
     }
     out.push('');
   }
@@ -205,9 +241,18 @@ async function main() {
       end: o.end ?? o.line ?? null,
       side: o.old ? 'old' : 'new',
       scope: o.scope,
+      newIssue: Boolean(o.newIssue),
       body,
     });
     console.log(`Added comment ${c.id} on ${c.file} ${rangeLabel(c)}.`);
+  } else if (cmd === 'comments') {
+    console.log(formatThreads(await call('GET', '/agent-api/comments?all=1')));
+  } else if (cmd === 'reply') {
+    const body = o.body === '-' ? readStdin() : o.body;
+    if (!o.to) throw new CliError('Missing --to ID (the comment to reply to; run "comments" to list ids).');
+    if (!body || !String(body).trim()) throw new CliError('Missing --body TEXT (or --body - to read it from stdin).');
+    const c = await call('POST', '/agent-api/reply', { name: o.as, to: o.to, body, stance: o.stance });
+    console.log(`Added reply ${c.id} (${STANCE_LABEL[c.stance]}) to comment ${c.inReplyTo} on ${c.file} ${rangeLabel(c)}.`);
   } else if (cmd === 'finish') {
     const summary = o.summary === '-' ? readStdin() : o.summary || '';
     const r = await call('POST', '/agent-api/finish', { name: o.as, verdict: o.verdict, summary });
@@ -219,10 +264,11 @@ async function main() {
     if (!comments.length) console.log(o.all ? 'No agent comments yet.' : `${o.as} has no comments yet.`);
     for (const c of comments) {
       const firstLine = c.body.split('\n')[0];
-      console.log(`[${c.status}] ${c.id} ${o.all ? `${c.author} ` : ''}${c.file} ${rangeLabel(c)}: ${firstLine.length > 100 ? firstLine.slice(0, 99) + '…' : firstLine}`);
+      const kind = c.parentId ? `reply to ${c.inReplyTo || c.parentId} ` : '';
+      console.log(`[${c.status}] ${c.id} ${o.all ? `${c.author} ` : ''}${kind}${c.file} ${rangeLabel(c)}: ${firstLine.length > 100 ? firstLine.slice(0, 99) + '…' : firstLine}`);
     }
   } else {
-    throw new CliError(`Unknown command "${cmd}". Commands: guide, diff, comment, finish, status.`);
+    throw new CliError(`Unknown command "${cmd}". Commands: guide, diff, comment, comments, reply, finish, status.`);
   }
 }
 
@@ -233,4 +279,4 @@ if (require.main === module) {
   });
 }
 
-module.exports = { parseArgs, formatDiff };
+module.exports = { parseArgs, formatDiff, formatThreads };

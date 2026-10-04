@@ -82,12 +82,15 @@ Other agents can review the same changes alongside you, each under its own name.
 You are code reviewer "Alice". Review the code changes in /path/to/repo. Run: node "/path/to/ai_review/server/agent.js" --repo "/path/to/repo" --as "Alice" guide — then follow its instructions.
 ```
 
-The `guide` command teaches the agent the workflow: `diff` to read numbered changes, `comment --file F --line N [--end M] [--old] --body TEXT` to comment, `finish --verdict approve|comment|request_changes --summary TEXT` to give its verdict, and `status` to see your decisions. Agents can only read and comment. They can't submit the review, or accept or reject comments.
+The `guide` command teaches the agent the workflow: `diff` to read numbered changes, `comment --file F --line N [--end M] [--old] --body TEXT` to comment, `comments` to read every reviewer's comments as threads, `reply --to ID [--stance agree|disagree|info] --body TEXT` to answer another reviewer's comment, `finish --verdict approve|comment|request_changes --summary TEXT` to give its verdict, and `status` to see your decisions.
+
+**Replies.** An agent that starts after another one can reply to that reviewer's comments to agree, disagree or add context. For example, Bob can reply on Alice's comment instead of repeating it. Each reply is attached to the comment's thread. If an agent tries to comment on lines another reviewer already covered, `comment` refuses and shows the existing comment, so the agent replies instead, or passes `--new-issue` when the problem really is different. Agents can only read and comment. They can't submit the review, or accept or reject comments.
 
 In the UI, the **Reviewers** panel shows each agent's verdict, comment counts and summary. Its comments appear inline as they arrive:
 
-- **Accept** or **Reject** each comment, or use **Accept all pending** / **Reject all** for one reviewer. **Undo** sets a comment back to pending.
-- When you submit (you are the final approval), your comments and every agent comment you haven't rejected (accepted or still pending) go to the implementing agent, labelled with their author. Rejected comments and dropped summaries are kept only in `.git/ai-review/history/`.
+- **Accept** or **Reject** each comment and each reply, or use **Accept all pending** / **Reject all** for one reviewer. **Undo** sets a comment back to pending.
+- Replies appear inside their comment's thread with a stance badge (👍 agrees / 👎 disagrees / ℹ️ adds info). Rejecting a comment drops its whole thread, replies included.
+- When you submit (you are the final approval), your comments and every agent comment you haven't rejected (accepted or still pending) go to the implementing agent, labelled with their author. Replies follow under the comment they answer. Rejected comments and dropped summaries are kept only in `.git/ai-review/history/`.
 
 ## Standalone
 

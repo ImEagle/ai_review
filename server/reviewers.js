@@ -10,6 +10,7 @@ const state = require('./state');
 
 const VERDICTS = ['approve', 'comment', 'request_changes'];
 const STATUSES = ['pending', 'accepted', 'rejected'];
+const STANCES = ['info', 'agree', 'disagree'];
 const AGENT_CLI = path.join(__dirname, 'agent.js');
 
 class InputError extends Error {}
@@ -88,6 +89,23 @@ class ReviewerStore {
       }
     }
 
+    // Steer agents to reply instead of repeating another reviewer's point on the same lines.
+    if (!input.newIssue) {
+      const overlaps = (c) =>
+        c.start == null || start == null ? c.start == null && start == null : c.side === side && c.start <= end && start <= c.end;
+      const others = this.data.comments.filter((c) => !c.parentId && c.author !== name && c.file === file.path && c.scope === scope && overlaps(c));
+      if (others.length) {
+        const list = others
+          .map((c) => `  [${c.id}] ${c.author} on ${c.start == null ? 'the file' : `L${c.start}${c.end !== c.start ? `–L${c.end}` : ''}`}: ${c.body.split('\n')[0].slice(0, 120)}`)
+          .join('\n');
+        throw new InputError(
+          `Other reviewers already commented on these lines:\n${list}\n` +
+            `If you are making the same point, or want to agree, disagree or add context, use "reply --to ID" instead. ` +
+            `If this is a genuinely different issue, re-run the same command with --new-issue.`
+        );
+      }
+    }
+
     this.join(name);
     const comment = {
       id: crypto.randomBytes(4).toString('hex'),
@@ -107,6 +125,54 @@ class ReviewerStore {
     this.data.reviewers[name].updatedAt = comment.createdAt;
     this.save();
     return comment;
+  }
+
+  /** A reply to another comment. Threads are one level deep: replying to a reply attaches to its root. */
+  addReply(rawName, parentId, rawBody, rawStance = 'info') {
+    const name = cleanName(rawName);
+    const body = String(rawBody || '').trim();
+    if (!body) throw new InputError('Reply body is empty.');
+    const stance = rawStance || 'info';
+    if (!STANCES.includes(stance)) throw new InputError(`Stance must be one of: ${STANCES.join(', ')}.`);
+    const parent = this.data.comments.find((c) => c.id === String(parentId || '').trim());
+    if (!parent) {
+      const ids = this.data.comments.map((c) => `${c.id} (${c.author})`).join(', ');
+      throw new InputError(`No comment with id "${parentId}". Run "comments" to see the ids. Existing: ${ids || '(none)'}`);
+    }
+    const root = parent.parentId ? this.data.comments.find((c) => c.id === parent.parentId) || parent : parent;
+
+    this.join(name);
+    const reply = {
+      id: crypto.randomBytes(4).toString('hex'),
+      parentId: root.id,
+      inReplyTo: parent.id,
+      stance,
+      author: name,
+      scope: root.scope,
+      file: root.file,
+      side: root.side,
+      start: root.start,
+      end: root.end,
+      body,
+      snippet: [],
+      lang: root.lang,
+      status: 'pending',
+      createdAt: new Date().toISOString(),
+    };
+    this.data.comments.push(reply);
+    this.data.reviewers[name].updatedAt = reply.createdAt;
+    this.save();
+    return reply;
+  }
+
+  /** What goes to the implementing agent: nothing rejected, and nothing in a rejected thread. */
+  sendable() {
+    const byId = new Map(this.data.comments.map((c) => [c.id, c]));
+    return this.data.comments.filter((c) => {
+      if (c.status === 'rejected') return false;
+      const root = c.parentId && byId.get(c.parentId);
+      return !root || root.status !== 'rejected';
+    });
   }
 
   finish(rawName, verdict, summary = '') {
@@ -156,4 +222,4 @@ class ReviewerStore {
   }
 }
 
-module.exports = { ReviewerStore, InputError, agentPrompt, cleanName, VERDICTS, AGENT_CLI };
+module.exports = { ReviewerStore, InputError, agentPrompt, cleanName, VERDICTS, STANCES, AGENT_CLI };

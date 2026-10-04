@@ -168,3 +168,81 @@ test('feedback: a kept reviewer summary alone is actionable', () => {
   assert.doesNotMatch(md, /submitted no comments/);
   assert.ok(!hasFeedback({ ...review, reviewers: [{ name: 'Alice', verdict: 'request_changes', summary: '' }] }));
 });
+
+test('agent replies: threads, validation, and what reaches the implementing agent', async (t) => {
+  const r = tmpRepo();
+  t.after(r.cleanup);
+  r.write('a.js', 'const a = 1;\n');
+  r.commit('init');
+  r.write('a.js', 'const a = 2;\nconst b = 3;\n');
+
+  let url;
+  const done = runReview({ cwd: r.dir, open: false, timeout: 1, log: (u) => (url = u) });
+  while (!url) await new Promise((res) => setTimeout(res, 10));
+  const { origin, searchParams } = new URL(url);
+  const ui = { 'X-Review-Token': searchParams.get('t'), 'Content-Type': 'application/json' };
+  const idOf = (out) => /(?:comment|reply) ([0-9a-f]{8})/.exec(out.stdout)[1];
+
+  const c1 = idOf(await agent(r.dir, ['--as', 'Alice', 'comment', '--file', 'a.js', '--line', '1', '--body', 'Why 2?']));
+  const c2 = idOf(await agent(r.dir, ['--as', 'Alice', 'comment', '--file', 'a.js', '--line', '2', '--body', 'b is unused.']));
+
+  let res = await agent(r.dir, ['--as', 'Bob', 'reply', '--to', 'deadbeef', '--body', 'x']);
+  assert.equal(res.code, 2);
+  assert.match(res.stderr, /No comment with id "deadbeef"/);
+  res = await agent(r.dir, ['--as', 'Bob', 'reply', '--to', c1, '--stance', 'maybe', '--body', 'x']);
+  assert.match(res.stderr, /Stance must be one of/);
+
+  res = await agent(r.dir, ['--as', 'Bob', 'reply', '--to', c1, '--stance', 'disagree', '--body', '-'], 'The spec says 2.\nSee docs/limits.md.');
+  assert.equal(res.code, 0, res.stderr);
+  assert.match(res.stdout, /Added reply [0-9a-f]{8} \(disagrees\) to comment/);
+  const r1 = idOf(res);
+  // reply to a reply attaches to the root
+  const r2 = idOf(await agent(r.dir, ['--as', 'Carol', 'reply', '--to', r1, '--stance', 'agree', '--body', 'Bob is right.']));
+  const r3 = idOf(await agent(r.dir, ['--as', 'Bob', 'reply', '--to', c2, '--body', 'It is used in b.test.js.']));
+
+  const threads = (await agent(r.dir, ['--as', 'Carol', 'comments'])).stdout;
+  assert.match(threads, new RegExp(`\\[${c1}\\] Alice · a\\.js L1 · pending\\n    Why 2\\?\\n    ↳ \\[${r1}\\] Bob \\(disagrees\\) · pending\\n        The spec says 2\\.\\n        See docs/limits\\.md\\.\\n    ↳ \\[${r2}\\] Carol \\(agrees re ${r1}\\) · pending`));
+
+  const agents = await (await fetch(`${origin}/api/agents`, { headers: ui })).json();
+  assert.equal(agents.comments.find((c) => c.id === r2).parentId, c1);
+
+  // reject Carol's reply; reject Alice's 2nd comment (drops Bob's reply r3 with it)
+  const setStatus = (id, status) => fetch(`${origin}/api/agent-comments/${id}`, { method: 'POST', headers: ui, body: JSON.stringify({ status }) });
+  await setStatus(r2, 'rejected');
+  await setStatus(c2, 'rejected');
+  await fetch(`${origin}/api/submit`, { method: 'POST', headers: ui, body: JSON.stringify({ verdict: 'comment', comments: [] }) });
+  const { markdown } = await done;
+
+  assert.match(markdown, /1 comment, 1 reply · 1 file/);
+  assert.match(markdown, /### L1 \(new\) · Alice\n```javascript\nconst a = 2;\n```\n> Why 2\?\n\n↳ \*\*Bob\*\* \(disagrees\):\n> The spec says 2\.\n> See docs\/limits\.md\./);
+  assert.doesNotMatch(markdown, /Bob is right|b is unused|b\.test\.js/);
+  assert.match(markdown, /- \*\*Bob\*\* — no verdict, 0 comments, 1 reply kept/);
+  assert.match(markdown, /"↳" replies are other reviewers' context/);
+});
+
+test('commenting on lines another reviewer already covered points to reply / --new-issue', async (t) => {
+  const r = tmpRepo();
+  t.after(r.cleanup);
+  r.write('a.js', 'x\n');
+  r.commit('init');
+  r.write('a.js', 'one\ntwo\nthree\nfour\n');
+  let url;
+  const done = runReview({ cwd: r.dir, open: false, timeout: 1, log: (u) => (url = u) });
+  while (!url) await new Promise((res) => setTimeout(res, 10));
+
+  const first = await agent(r.dir, ['--as', 'Alice', 'comment', '--file', 'a.js', '--line', '2', '--end', '3', '--body', 'Rename these.']);
+  assert.equal(first.code, 0, first.stderr);
+  // same author may add more on the same lines; a non-overlapping range is fine for others
+  assert.equal((await agent(r.dir, ['--as', 'Alice', 'comment', '--file', 'a.js', '--line', '3', '--body', 'Also typo.'])).code, 0);
+  assert.equal((await agent(r.dir, ['--as', 'Bob', 'comment', '--file', 'a.js', '--line', '4', '--body', 'Unrelated.'])).code, 0);
+
+  const dup = await agent(r.dir, ['--as', 'Bob', 'comment', '--file', 'a.js', '--line', '1', '--end', '2', '--body', 'Rename.']);
+  assert.equal(dup.code, 2);
+  assert.match(dup.stderr, /Other reviewers already commented on these lines:\n  \[[0-9a-f]{8}\] Alice on L2–L3: Rename these\./);
+  assert.match(dup.stderr, /reply --to ID.*--new-issue/s);
+  assert.equal((await agent(r.dir, ['--as', 'Bob', 'comment', '--file', 'a.js', '--line', '2', '--new-issue', '--body', 'Different bug.'])).code, 0);
+
+  const { origin, searchParams } = new URL(url);
+  await fetch(`${origin}/api/cancel`, { method: 'POST', headers: { 'X-Review-Token': searchParams.get('t') } });
+  await done;
+});

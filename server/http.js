@@ -117,11 +117,11 @@ function createReviewServer({ root, gitDir, initialScope = 'working', hook = fal
         scope,
         verdict: body.verdict || 'comment',
         general: body.general || '',
-        comments: [...userComments, ...agentComments.filter((c) => c.status !== 'rejected')],
+        comments: [...userComments, ...store.sendable()],
         reviewers: reviewers.map((r) => (r.summaryStatus === 'rejected' ? { ...r, summary: '' } : r)),
       };
       const markdown = formatFeedback(review, { scopeLabel: gitlib.scopeLabel(root, scope) });
-      state.saveHistory(gitDir, { ...review, rejected: agentComments.filter((c) => c.status === 'rejected'), allReviewers: reviewers, markdown });
+      state.saveHistory(gitDir, { ...review, allAgentComments: agentComments, allReviewers: reviewers, markdown });
       state.clearDraft(gitDir);
       store.clear();
       setImmediate(() => finish({ status: 'submitted', review, markdown }));
@@ -141,6 +141,10 @@ function createReviewServer({ root, gitDir, initialScope = 'working', hook = fal
     'POST /agent-api/comment': async (req) => {
       const b = await readBody(req);
       return store.addComment(b.name, b);
+    },
+    'POST /agent-api/reply': async (req) => {
+      const b = await readBody(req);
+      return store.addReply(b.name, b.to, b.body, b.stance);
     },
     'POST /agent-api/finish': async (req) => {
       const b = await readBody(req);
