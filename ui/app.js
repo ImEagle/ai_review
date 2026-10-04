@@ -112,6 +112,7 @@ const S = {
   editor: null, // { file, side, start, end, body, editingId }
   drag: null, // { fileIdx, side, start, end }
   finished: false,
+  agents: { reviewers: [], comments: [] }, // agent reviewers, pushed live over SSE
 };
 
 let saveTimer = null;
@@ -130,7 +131,25 @@ function saveDraft() {
 
 const viewedKey = (path) => `${S.scope}|${path}`;
 const scopeComments = () => S.comments.filter((c) => c.scope === S.scope);
-const fileComments = (path) => scopeComments().filter((c) => c.file === path);
+const agentComments = () => S.agents.comments.filter((c) => c.scope === S.scope);
+// Everything shown inline: the user's comments plus agent comments (rejected ones are shown dimmed).
+const fileComments = (path) => [...scopeComments(), ...agentComments()].filter((c) => c.file === path);
+// Comments that will be sent: everything except rejected agent comments.
+const liveCount = (path) => fileComments(path).filter((c) => c.status !== 'rejected').length;
+const sentAgentComments = () => S.agents.comments.filter((c) => c.status !== 'rejected');
+const sentSummaries = () => S.agents.reviewers.filter((r) => r.summary && r.summary.trim() && r.summaryStatus !== 'rejected');
+
+function hue(name) {
+  let h = 0;
+  for (const ch of name) h = (h * 31 + ch.codePointAt(0)) % 360;
+  return h;
+}
+
+function avatar(name) {
+  return name
+    ? `<span class="avatar" style="--h:${hue(name)}">${esc([...name][0].toUpperCase())}</span>`
+    : '<span class="avatar you">Y</span>';
+}
 
 function anchorOf(line) {
   return line.type === 'del' ? `old:${line.oldNo}` : `new:${line.newNo}`;
@@ -180,9 +199,13 @@ async function init() {
     banner.textContent = 'Your review is sent back to Claude when you submit it.';
   }
 
+  S.agents = S.meta.agents || S.agents;
   renderScopeSelect();
   renderPrevious();
+  renderReviewers();
+  updateInvitePrompt();
   await loadDiff();
+  connectEvents();
 }
 
 function renderScopeSelect() {
@@ -245,7 +268,7 @@ function renderStats() {
   const a = S.files.reduce((s, f) => s + f.additions, 0);
   const d = S.files.reduce((s, f) => s + f.deletions, 0);
   $('#stats').innerHTML = `${S.files.length} file${S.files.length === 1 ? '' : 's'} changed <span class="a">+${a}</span> <span class="d">−${d}</span>`;
-  $('#count').textContent = S.comments.length;
+  $('#count').textContent = S.comments.length + sentAgentComments().length;
 }
 
 function renderViewToggle() {
@@ -273,7 +296,7 @@ function renderTree() {
       html += `<li><div class="tree-dir">▾ ${esc(name)}</div>${renderNode(child)}</li>`;
     }
     for (const { f, i, name } of node.files.sort((a, b) => a.name.localeCompare(b.name))) {
-      const n = fileComments(f.path).length;
+      const n = liveCount(f.path);
       const viewed = S.viewed.has(viewedKey(f.path));
       html += `<li><div class="tree-file${viewed ? ' viewed' : ''}" data-goto="${i}" title="${esc(f.path)}">
         <span class="st st-${f.status}">${STATUS[f.status] || '?'}</span>
@@ -291,7 +314,7 @@ function renderPrevious() {
   if (!p) return;
   const when = new Date(p.submittedAt).toLocaleString();
   const items = (p.comments || [])
-    .map((c) => `<li><code class="loc">${esc(c.file)}:${esc(rangeLabel(c))}</code><div class="md">${md(c.body || '')}</div></li>`)
+    .map((c) => `<li><code class="loc">${esc(c.file)}:${esc(rangeLabel(c))}${c.author ? ` · ${esc(c.author)}` : ''}</code><div class="md">${md(c.body || '')}</div></li>`)
     .join('');
   const general = p.general ? `<li><code class="loc">General</code><div class="md">${md(p.general)}</div></li>` : '';
   $('#previous').innerHTML = `<details class="previous">
@@ -447,10 +470,23 @@ function splitTable(f, comments, ed) {
   return html + '</table>';
 }
 
+function agentCommentHtml(c, stale) {
+  const st = c.status || 'pending';
+  const actions =
+    st === 'pending'
+      ? `<button class="btn sm ok" data-act="agent-accepted">✓ Accept</button><button class="btn sm no" data-act="agent-rejected">✕ Reject</button>`
+      : `<span class="state ${st}">${st === 'accepted' ? 'Accepted' : 'Rejected · not sent'}</span><button class="link" data-act="agent-pending">Undo</button>`;
+  return `<div class="comment agent ${st}" data-id="${esc(c.id)}" style="--h:${hue(c.author)}">
+    <div class="c-head">${avatar(c.author)}<span class="who">${esc(c.author)}</span><span class="tag">agent</span><span>${esc(rangeLabel(c))}</span><span class="spacer"></span>${actions}</div>
+    <div class="c-body md${stale ? ' stale' : ''}">${md(c.body)}</div>
+  </div>`;
+}
+
 function commentHtml(c, stale = false) {
+  if (c.author) return agentCommentHtml(c, stale);
   if (S.editor && S.editor.editingId === c.id) return editorHtml(S.editor);
   return `<div class="comment" data-id="${esc(c.id)}">
-    <div class="c-head"><span class="who">You</span><span>${esc(rangeLabel(c))}</span><span class="spacer"></span>
+    <div class="c-head">${avatar(null)}<span class="who">You</span><span>${esc(rangeLabel(c))}</span><span class="spacer"></span>
       <button class="link" data-act="edit">Edit</button><button class="link" data-act="delete">Delete</button></div>
     <div class="c-body md${stale ? ' stale' : ''}">${md(c.body)}</div>
   </div>`;
@@ -604,6 +640,10 @@ files.addEventListener('click', (e) => {
   const act = btn.dataset.act;
   const commentId = btn.closest('.comment')?.dataset.id;
 
+  if (act.startsWith('agent-') && commentId) {
+    setAgentStatus(commentId, act.slice(6));
+    return;
+  }
   if (act === 'toggle') {
     if (S.viewed.has(viewedKey(f.path))) {
       S.viewed.delete(viewedKey(f.path));
@@ -793,15 +833,136 @@ document.addEventListener('keydown', (e) => {
 });
 
 // ---------------------------------------------------------------------------
+// agent reviewers
+
+const VERDICT_LABEL = { approve: 'approved', comment: 'commented', request_changes: 'changes requested' };
+
+function renderReviewers() {
+  const el = $('#rv-list');
+  const rows = S.agents.reviewers.map((r) => {
+    const mine = S.agents.comments.filter((c) => c.author === r.name);
+    const cnt = (st) => mine.filter((c) => c.status === st).length;
+    const pending = cnt('pending');
+    const chip = r.verdict ? `<span class="chip v-${r.verdict}">${VERDICT_LABEL[r.verdict]}</span>` : '<span class="chip busy">reviewing…</span>';
+    const summary = r.summary
+      ? `<div class="rv-summary ${r.summaryStatus}">
+          <div class="md">${md(r.summary)}</div>
+          <div class="rv-actions">${
+            r.summaryStatus === 'pending'
+              ? `<button class="btn sm ok" data-rv="summary" data-st="accepted">✓ Keep summary</button><button class="btn sm no" data-rv="summary" data-st="rejected">✕ Drop</button>`
+              : `<span class="state ${r.summaryStatus}">Summary ${r.summaryStatus === 'accepted' ? 'kept' : 'dropped'}</span><button class="link" data-rv="summary" data-st="pending">Undo</button>`
+          }</div></div>`
+      : '';
+    return `<li class="rv" data-name="${esc(r.name)}">
+      <div class="rv-head">${avatar(r.name)}<b>${esc(r.name)}</b>${chip}</div>
+      <div class="rv-counts">${mine.length} comment${mine.length === 1 ? '' : 's'} · ${cnt('accepted')} accepted · ${pending} pending · ${cnt('rejected')} rejected</div>
+      ${pending || cnt('accepted') ? `<div class="rv-actions">${pending ? '<button class="btn sm ok" data-rv="bulk" data-st="accepted">Accept all pending</button>' : ''}<button class="btn sm no" data-rv="bulk" data-st="rejected">Reject all</button></div>` : ''}
+      ${summary}
+    </li>`;
+  });
+  el.innerHTML = `<li class="rv"><div class="rv-head">${avatar(null)}<b>You</b><span class="chip final">final approval</span></div></li>${rows.join('')}`;
+}
+
+function updateInvitePrompt() {
+  const ta = $('#invite-prompt');
+  if (!ta || !S.meta) return;
+  const name = (S.inviteName || '').trim().replace(/["`$\\\n]/g, '') || 'NAME';
+  ta.value = S.meta.agentPrompt.split('"NAME"').join(`"${name}"`);
+}
+
+async function setAgentStatus(id, status) {
+  try {
+    applyAgents(await api('POST', `/api/agent-comments/${encodeURIComponent(id)}`, { status }));
+  } catch (e) {
+    console.warn(e);
+  }
+}
+
+function applyAgents(next) {
+  const before = new Set(S.agents.comments.map((c) => c.file));
+  S.agents = next;
+  const touched = new Set([...before, ...next.comments.map((c) => c.file)]);
+  for (const path of touched) {
+    // Don't yank an editor the user is typing in; it re-renders when they save or cancel.
+    const i = S.files.findIndex((f) => f.path === path);
+    const el = i >= 0 && document.getElementById(`file-${i}`);
+    if (el && el.contains(document.activeElement) && document.activeElement.tagName === 'TEXTAREA') continue;
+    if (i >= 0) renderFile(i);
+  }
+  renderReviewers();
+  renderTree();
+  renderStats();
+  if (!panel.hidden) updateFinishNote();
+}
+
+let pollTimer = null;
+function connectEvents() {
+  if (!window.EventSource) return startPolling();
+  const es = new EventSource(`/api/events?t=${encodeURIComponent(TOKEN)}`);
+  es.addEventListener('agents', (e) => {
+    stopPolling();
+    applyAgents(JSON.parse(e.data));
+  });
+  es.onerror = () => {
+    if (S.finished) return es.close();
+    startPolling(); // EventSource keeps retrying on its own; poll meanwhile
+  };
+}
+function startPolling() {
+  if (pollTimer || S.finished) return;
+  pollTimer = setInterval(() => api('GET', '/api/agents').then(applyAgents).catch(() => {}), 3000);
+}
+function stopPolling() {
+  clearInterval(pollTimer);
+  pollTimer = null;
+}
+
+$('#reviewers').addEventListener('click', async (e) => {
+  const b = e.target.closest('[data-rv]');
+  if (b) {
+    const name = b.closest('.rv').dataset.name;
+    try {
+      const url = b.dataset.rv === 'bulk' ? '/api/agent-comments/bulk' : `/api/reviewers/${encodeURIComponent(name)}`;
+      const body = b.dataset.rv === 'bulk' ? { author: name, status: b.dataset.st } : { summaryStatus: b.dataset.st };
+      applyAgents(await api('POST', url, body));
+    } catch (err) {
+      console.warn(err);
+    }
+    return;
+  }
+  if (e.target.id === 'invite-copy') {
+    const ta = $('#invite-prompt');
+    try {
+      await navigator.clipboard.writeText(ta.value);
+    } catch {
+      ta.select();
+      document.execCommand('copy');
+    }
+    e.target.textContent = 'Copied ✓';
+    setTimeout(() => (e.target.textContent = 'Copy prompt'), 1500);
+  }
+});
+$('#reviewers').addEventListener('input', (e) => {
+  if (e.target.id !== 'invite-name') return;
+  S.inviteName = e.target.value;
+  updateInvitePrompt();
+});
+
+// ---------------------------------------------------------------------------
 // finish review
 
 const panel = $('#finish-panel');
 
 function updateFinishNote() {
   const other = S.comments.length - scopeComments().length;
+  const ac = S.agents.comments;
+  const acc = ac.filter((c) => c.status === 'accepted').length;
+  const pend = ac.filter((c) => c.status === 'pending').length;
+  const rej = ac.filter((c) => c.status === 'rejected').length;
+  const agentNote = ac.length ? `Agent comments: ${acc + pend} will be sent (${acc} accepted, ${pend} pending), ${rej} rejected. ` : '';
   const unsaved = S.editor && S.editor.body.trim() ? 'You have an unsaved comment open; it will not be included until you add it. ' : '';
   $('#finish-note').textContent =
-    unsaved + (other > 0 ? `${other} comment(s) were made on a different scope and will be included.` : '');
+    unsaved + agentNote + (other > 0 ? `${other} of your comment(s) were made on a different scope and will be included.` : '');
 }
 
 $('#finish').addEventListener('click', (e) => {
@@ -843,7 +1004,7 @@ function showDone(title, text) {
 $('#submit').addEventListener('click', async () => {
   const err = $('#finish-error');
   err.textContent = '';
-  if (S.verdict !== 'approve' && !S.comments.length && !S.general.trim()) {
+  if (S.verdict !== 'approve' && !S.comments.length && !S.general.trim() && !sentAgentComments().length && !sentSummaries().length) {
     err.textContent = 'Add at least one comment, or choose Approve.';
     return;
   }
@@ -854,7 +1015,7 @@ $('#submit').addEventListener('click', async () => {
     const msg =
       S.verdict === 'approve'
         ? 'Claude has been told the changes are approved.'
-        : `${S.comments.length} comment(s) were sent to Claude to address.`;
+        : `${S.comments.length + sentAgentComments().length} comment(s)${sentSummaries().length ? ` and ${sentSummaries().length} reviewer summary(ies)` : ''} were sent to Claude to address.`;
     showDone('Review submitted', `${msg} You can close this tab.`);
   } catch (e) {
     err.textContent = `Submit failed: ${e.message}`;

@@ -64,7 +64,43 @@ function writeLastReviewedHash(gitDir, hash) {
   fs.writeFileSync(path.join(stateDir(gitDir), 'last-reviewed'), hash + '\n');
 }
 
+// Agent reviewers' comments are kept apart from the user's draft so the UI's
+// whole-draft writes can never clobber them.
+const emptyAgents = () => ({ reviewers: {}, comments: [] });
+
+function readAgents(gitDir) {
+  return { ...emptyAgents(), ...readJson(path.join(stateDir(gitDir), 'agents.json'), {}) };
+}
+
+function writeAgents(gitDir, data) {
+  writeJson(path.join(stateDir(gitDir), 'agents.json'), data);
+}
+
+function clearAgents(gitDir) {
+  fs.rmSync(path.join(stateDir(gitDir), 'agents.json'), { force: true });
+}
+
+// session.json tells agent.js how to reach the running review server.
+function writeSession(gitDir, session) {
+  writeJson(path.join(stateDir(gitDir), 'session.json'), session);
+}
+
+function readSession(gitDir) {
+  return readJson(path.join(stateDir(gitDir), 'session.json'), null);
+}
+
+function clearSession(gitDir, pid = process.pid) {
+  const s = readSession(gitDir);
+  if (s && s.pid === pid) fs.rmSync(path.join(stateDir(gitDir), 'session.json'), { force: true });
+}
+
 module.exports = {
+  readAgents,
+  writeAgents,
+  clearAgents,
+  writeSession,
+  readSession,
+  clearSession,
   stateDir,
   readDraft,
   writeDraft,

@@ -246,7 +246,57 @@ function parseUnifiedDiff(text) {
   return files;
 }
 
+// ---------------------------------------------------------------------------
+// Line helpers shared by the agent API and the feedback formatter
+
+/** Line numbers addressable on one side of a parsed file ('new' = added + context, 'old' = deleted + context). */
+function sideLines(file, side) {
+  const out = new Map();
+  for (const h of file.hunks) {
+    for (const l of h.lines) {
+      const no = side === 'old' ? (l.type === 'add' ? null : l.oldNo) : l.type === 'del' ? null : l.newNo;
+      if (no != null) out.set(no, l.text);
+    }
+  }
+  return out;
+}
+
+function snippetFor(file, side, start, end, max = 80) {
+  const lines = sideLines(file, side);
+  const out = [];
+  for (let n = start; n <= end && out.length < max; n++) if (lines.has(n)) out.push(lines.get(n));
+  return out;
+}
+
+/** Compresses [1,2,3,7,8] into "1–3, 7–8". */
+function describeRanges(nums) {
+  const sorted = [...nums].sort((a, b) => a - b);
+  const parts = [];
+  for (let i = 0; i < sorted.length; ) {
+    let j = i;
+    while (j + 1 < sorted.length && sorted[j + 1] === sorted[j] + 1) j++;
+    parts.push(i === j ? `${sorted[i]}` : `${sorted[i]}–${sorted[j]}`);
+    i = j + 1;
+  }
+  return parts.join(', ');
+}
+
+const EXT_LANGS = {
+  js: 'javascript', mjs: 'javascript', cjs: 'javascript', jsx: 'javascript', ts: 'typescript', tsx: 'typescript',
+  py: 'python', rb: 'ruby', go: 'go', rs: 'rust', java: 'java', kt: 'kotlin', swift: 'swift', c: 'c', h: 'c',
+  cc: 'cpp', cpp: 'cpp', hpp: 'cpp', cs: 'csharp', php: 'php', sh: 'bash', bash: 'bash', zsh: 'bash', json: 'json',
+  yml: 'yaml', yaml: 'yaml', md: 'markdown', html: 'html', css: 'css', scss: 'scss', sql: 'sql', lua: 'lua',
+};
+
+function langFor(p) {
+  return EXT_LANGS[(p || '').split('.').pop().toLowerCase()] || '';
+}
+
 module.exports = {
+  sideLines,
+  snippetFor,
+  describeRanges,
+  langFor,
   EMPTY_TREE,
   git,
   isGitRepo,

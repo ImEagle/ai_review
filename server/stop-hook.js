@@ -11,6 +11,8 @@ const crypto = require('node:crypto');
 const gitlib = require('./git');
 const state = require('./state');
 const { runReview } = require('./review');
+const { hasFeedback } = require('./feedback');
+const { agentPrompt } = require('./reviewers');
 
 function readStdin() {
   try {
@@ -48,7 +50,7 @@ async function main() {
     hook: true,
     open: !process.env.AI_REVIEW_NO_OPEN,
     timeout: parseFloat(process.env.AI_REVIEW_HOOK_TIMEOUT) || 55,
-    log: (url) => process.stderr.write(`ai-review: review the changes at ${url}\n`),
+    log: (url) => process.stderr.write(`ai-review: review the changes at ${url}\nai-review: agent reviewers can join with: ${agentPrompt(target.root)}\n`),
   });
 
   // Remember the state we reviewed (whatever the outcome) so the same diff
@@ -58,7 +60,7 @@ async function main() {
   if (result.status !== 'submitted') return;
   const { review, markdown } = result;
   if (review.verdict === 'approve') return;
-  if (!review.comments.length && !review.general.trim()) return;
+  if (!hasFeedback(review)) return;
   process.stdout.write(JSON.stringify({ decision: 'block', reason: markdown }));
 }
 

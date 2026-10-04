@@ -55,6 +55,17 @@
 
   <div class="layout">
     <aside class="sidebar">
+      <section id="reviewers" class="reviewers">
+        <h4>Reviewers</h4>
+        <ul id="rv-list" class="rv-list"></ul>
+        <details class="invite">
+          <summary>+ Invite agent reviewer</summary>
+          <input id="invite-name" placeholder="Name, e.g. Alice" maxlength="40" autocomplete="off">
+          <textarea id="invite-prompt" readonly rows="6"></textarea>
+          <button class="btn sm" id="invite-copy" type="button">Copy prompt</button>
+          <small>Paste it into another agent session (Claude Code, Codex, Gemini…). Its comments appear here live.</small>
+        </details>
+      </section>
       <input id="filter" type="search" placeholder="Filter changed files…">
       <nav id="tree"></nav>
     </aside>

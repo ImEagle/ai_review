@@ -8,6 +8,7 @@
 const { spawn } = require('node:child_process');
 const gitlib = require('./git');
 const { createReviewServer } = require('./http');
+const { agentPrompt } = require('./reviewers');
 
 function parseArgs(argv) {
   const opts = { scope: 'working', port: 0, open: !process.env.AI_REVIEW_NO_OPEN, timeout: 120, hook: false };
@@ -56,12 +57,22 @@ async function runReview({ cwd, scope = 'working', port = 0, open = true, timeou
   log(url);
   if (open) openBrowser(url);
 
+  // Remove session.json even when killed (Ctrl-C, hook timeout, background task stop).
+  const onSignal = (sig) => {
+    srv.close();
+    process.exit(sig === 'SIGINT' ? 130 : 143);
+  };
+  process.once('SIGINT', onSignal);
+  process.once('SIGTERM', onSignal);
+
   let timer;
   if (timeout > 0) {
     timer = setTimeout(() => resolveDone({ status: 'timeout' }), timeout * 60 * 1000);
   }
   const result = await donePromise;
   clearTimeout(timer);
+  process.off('SIGINT', onSignal);
+  process.off('SIGTERM', onSignal);
   // Give the browser a moment to receive the submit response.
   await new Promise((r) => setTimeout(r, 150));
   srv.close();
@@ -84,7 +95,13 @@ async function main() {
   const result = await runReview({
     ...opts,
     cwd,
-    log: (url) => console.log(`Review UI: ${url}\nWaiting for the reviewer to submit (timeout ${opts.timeout || '∞'} min)…\n`),
+    log: (url) =>
+      console.log(
+        `Review UI: ${url}\n\n` +
+          `Agent reviewers (optional): paste this into another agent session, replacing NAME (e.g. Alice):\n` +
+          `  ${agentPrompt(gitlib.repoRoot(cwd))}\n\n` +
+          `Waiting for the reviewer to submit (timeout ${opts.timeout || '∞'} min)…\n`
+      ),
   });
 
   if (result.status === 'submitted') {
