@@ -4,11 +4,14 @@
 // Starts the local review UI, waits for the reviewer, prints the feedback.
 //
 // Usage: node review.js [--scope working|branch|commits:N] [--port N] [--no-open] [--timeout MIN]
+//                       [--context-file PATH | --context - | --context TEXT]
 
+const fs = require('node:fs');
 const { spawn } = require('node:child_process');
 const gitlib = require('./git');
 const { createReviewServer } = require('./http');
 const { agentPrompt } = require('./reviewers');
+const { resolveContext } = require('./context');
 
 function parseArgs(argv) {
   const opts = { scope: 'working', port: 0, open: !process.env.AI_REVIEW_NO_OPEN, timeout: 120, hook: false };
@@ -21,6 +24,10 @@ function parseArgs(argv) {
     else if (a === '--no-open') opts.open = false;
     else if (a === '--timeout') opts.timeout = parseFloat(val()) || 0;
     else if (a === '--hook') opts.hook = true;
+    else if (a === '--context-file') opts.contextFile = val();
+    else if (a.startsWith('--context-file=')) opts.contextFile = a.slice(15);
+    else if (a === '--context') opts.contextText = val();
+    else if (a.startsWith('--context=')) opts.contextText = a.slice(10);
     else if (a === 'branch' || a === 'working' || /^commits:\d+$/.test(a)) opts.scope = a;
     else if (/^\d+$/.test(a)) opts.scope = `commits:${a}`;
     else if (a === '-h' || a === '--help') opts.help = true;
@@ -46,13 +53,14 @@ function openBrowser(url) {
  * Runs one review round. Resolves with { status: 'submitted'|'cancelled'|'timeout', review?, markdown? }.
  * `log(url)` is called once the server is listening.
  */
-async function runReview({ cwd, scope = 'working', port = 0, open = true, timeout = 120, hook = false, log = () => {} }) {
+async function runReview({ cwd, scope = 'working', port = 0, open = true, timeout = 120, hook = false, context, hookInput, log = () => {} }) {
   const root = gitlib.repoRoot(cwd);
   const gitDir = gitlib.gitDir(cwd);
+  const ctx = resolveContext({ gitDir, text: context, hookInput });
 
   let resolveDone;
   const donePromise = new Promise((r) => (resolveDone = r));
-  const srv = createReviewServer({ root, gitDir, initialScope: scope, hook, onDone: resolveDone });
+  const srv = createReviewServer({ root, gitDir, initialScope: scope, hook, context: ctx, onDone: resolveDone });
   const url = await srv.listen(port);
   log(url);
   if (open) openBrowser(url);
@@ -82,7 +90,13 @@ async function runReview({ cwd, scope = 'working', port = 0, open = true, timeou
 async function main() {
   const opts = parseArgs(process.argv.slice(2));
   if (opts.help) {
-    console.log('Usage: review.js [working|branch|commits:N|N] [--port N] [--no-open] [--timeout MIN]');
+    console.log(
+      'Usage: review.js [working|branch|commits:N|N] [--port N] [--no-open] [--timeout MIN]\n' +
+        '                 [--context-file PATH | --context - (stdin) | --context TEXT]\n\n' +
+        'The context is your markdown description of the change (task, approach, notes per file,\n' +
+        'open questions), shown to reviewers above the diff. Without it, <gitDir>/ai-review/context.md\n' +
+        'is used when it was written after the last review.'
+    );
     return;
   }
   const cwd = process.cwd();
@@ -92,8 +106,13 @@ async function main() {
     return;
   }
 
+  let context = opts.contextText;
+  if (context === '-') context = fs.readFileSync(0, 'utf8');
+  if (opts.contextFile) context = fs.readFileSync(opts.contextFile, 'utf8');
+
   const result = await runReview({
     ...opts,
+    context,
     cwd,
     log: (url) =>
       console.log(

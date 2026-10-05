@@ -6,6 +6,7 @@ Skills for Codex and a Claude Code plugin for reviewing the agent's changes the 
 - **Inline comments** on one line or a range: select code text and click the floating **Comment** button, or drag / shift-click the `+` or a line number. Also **file-level** comments and a **general** comment
 - **Suggestions**: a `suggestion` block pre-filled with the selected lines
 - **Viewed** checkboxes, a filter, and a choice of how much context to show (3, 10 or 25 lines, or full files)
+- **Author's description**: the implementing agent describes the task, its approach, the changes per file and any open questions. This is shown above the diff and given to agent reviewers, so nobody reviews a bare diff
 - Scope picker: uncommitted changes (the default, including untracked files), branch vs `main`/`master`, or the last N commits
 - Verdicts: **Comment**, **Approve**, or **Request changes**
 - **Agent reviewers**: invite other agents by name (e.g. "Alice") to comment on the same diff. Their comments appear live, and you **accept** or **reject** each one before your final approval
@@ -82,7 +83,7 @@ Other agents can review the same changes alongside you, each under its own name.
 You are code reviewer "Alice". Review the code changes in /path/to/repo. Run: node "/path/to/ai_review/server/agent.js" --repo "/path/to/repo" --as "Alice" guide — then follow its instructions.
 ```
 
-The `guide` command teaches the agent the workflow: `diff` to read numbered changes, `comment --file F --line N [--end M] [--old] --body TEXT` to comment, `comments` to read every reviewer's comments as threads, `reply --to ID [--stance agree|disagree|info] --body TEXT` to answer another reviewer's comment, `finish --verdict approve|comment|request_changes --summary TEXT` to give its verdict, and `status` to see your decisions.
+The `guide` command teaches the agent the workflow: `diff` to read the author's description followed by the numbered changes, `comment --file F --line N [--end M] [--old] --body TEXT` to comment, `comments` to read every reviewer's comments as threads, `reply --to ID [--stance agree|disagree|info] --body TEXT` to answer another reviewer's comment, `finish --verdict approve|comment|request_changes --summary TEXT` to give its verdict, and `status` to see your decisions.
 
 **Replies.** An agent that starts after another one can reply to that reviewer's comments to agree, disagree or add context. For example, Bob can reply on Alice's comment instead of repeating it. Each reply is attached to the comment's thread. If an agent tries to comment on lines another reviewer already covered, `comment` refuses and shows the existing comment, so the agent replies instead, or passes `--new-issue` when the problem really is different. Agents can only read and comment. They can't submit the review, or accept or reject comments.
 
@@ -95,10 +96,17 @@ In the UI, the **Reviewers** panel shows each agent's verdict, comment counts an
 ## Standalone
 
 ```bash
-node server/review.js [working|branch|commits:N] [--port N] [--no-open] [--timeout MIN]
+node server/review.js [working|branch|commits:N] [--port N] [--no-open] [--timeout MIN] \
+                      [--context-file PATH | --context - | --context TEXT]
 ```
 
 The review is printed to stdout when you submit.
+
+### Describing the change
+
+`--context` takes a markdown description of the change from the implementing agent (`-` reads it from stdin). Suggested sections are *Task*, *Approach*, *Changes by file* and *Not done / open questions*. The UI shows it in a **What changed and why** panel above the diff, and agent reviewers get it at the top of `agent.js diff` (or with `agent.js context`). The skills tell the agent to write it.
+
+If there is no `--context`, the description is read from `.git/ai-review/context.md`, but only when that file was written after the last reviewed round. With auto review, the agent can write this file before it stops. If it doesn't, the Stop hook falls back to Claude's last message for the turn, and the UI labels it as such. The file is deleted when a review is submitted.
 
 ## Where state lives
 
@@ -111,6 +119,7 @@ Everything is stored in `.git/ai-review/`, so it never shows up in the diff:
 | `auto` | auto-review flag |
 | `last-reviewed` | hash of the last reviewed diff (used by the hook) |
 | `agents.json` | agent reviewers' comments and your accept/reject decisions |
+| `context.md` | the agent's description of the pending change (optional; deleted on submit) |
 | `session.json` | port and token of the running review, so `agent.js` can find it (exists only while a review is running) |
 
 Environment variables: `AI_REVIEW_NO_OPEN=1` stops the browser from opening; `AI_REVIEW_HOOK_TIMEOUT=<min>` sets how long the hook waits.

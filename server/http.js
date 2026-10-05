@@ -55,7 +55,7 @@ function readBody(req) {
  *   /agent-api/*  – agent reviewers via agent.js (X-Agent-Token); they can read the
  *                   diff, comment and give a verdict, but never submit or accept/reject.
  */
-function createReviewServer({ root, gitDir, initialScope = 'working', hook = false, onDone }) {
+function createReviewServer({ root, gitDir, initialScope = 'working', hook = false, context = null, onDone }) {
   const token = crypto.randomBytes(16).toString('hex');
   const agentToken = crypto.randomBytes(16).toString('hex');
   let done = false;
@@ -80,6 +80,7 @@ function createReviewServer({ root, gitDir, initialScope = 'working', hook = fal
       root,
       hook,
       initialScope,
+      context,
       ...gitlib.getScopes(root),
       draft: state.readDraft(gitDir),
       previous: state.lastHistory(gitDir),
@@ -121,8 +122,9 @@ function createReviewServer({ root, gitDir, initialScope = 'working', hook = fal
         reviewers: reviewers.map((r) => (r.summaryStatus === 'rejected' ? { ...r, summary: '' } : r)),
       };
       const markdown = formatFeedback(review, { scopeLabel: gitlib.scopeLabel(root, scope) });
-      state.saveHistory(gitDir, { ...review, allAgentComments: agentComments, allReviewers: reviewers, markdown });
+      state.saveHistory(gitDir, { ...review, context, allAgentComments: agentComments, allReviewers: reviewers, markdown });
       state.clearDraft(gitDir);
+      state.clearContextFile(gitDir);
       store.clear();
       setImmediate(() => finish({ status: 'submitted', review, markdown }));
       return { ok: true };
@@ -134,7 +136,7 @@ function createReviewServer({ root, gitDir, initialScope = 'working', hook = fal
   };
 
   const agentApi = {
-    'GET /agent-api/info': () => ({ root, scope: initialScope, reviewers: store.snapshot().reviewers }),
+    'GET /agent-api/info': () => ({ root, scope: initialScope, context, reviewers: store.snapshot().reviewers }),
     'GET /agent-api/diff': (_req, url) =>
       gitlib.getDiff(root, url.searchParams.get('scope') || initialScope, { context: url.searchParams.get('context') || 3 }),
     'POST /agent-api/join': async (req) => store.join((await readBody(req)).name),

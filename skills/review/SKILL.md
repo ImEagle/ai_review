@@ -7,19 +7,43 @@ description: Open a GitHub-style review UI in the browser for the user to review
 
 The user wants to review your changes in a GitHub-style diff viewer, then hand comments back to you.
 
-## 1. Launch the review UI
+## 1. Describe the change
+
+The diff alone does not tell a reviewer (the user or other agents) what you were asked to do or why you did it this way. Before launching, write a short markdown description of the change being reviewed:
+
+```markdown
+## Task
+What the user asked for, in one or two sentences (quote the request if it is short).
+
+## Approach
+How you solved it and why; alternatives you rejected; anything surprising.
+
+## Changes by file
+- `path/to/file`: what changed there and why.
+
+## Not done / open questions
+Known gaps, shortcuts, risks, things you want the reviewer to check. "None" if none.
+```
+
+Keep it factual and short (it is not a sales pitch): reviewers use it to check that the code does what you say, so mention shortcuts and anything unfinished. For the `branch` or `commits:N` scope, describe the whole range, not just your latest turn.
+
+## 2. Launch the review UI
 
 Resolve the ai-review installation root from this skill's location: it is two directories above `skills/review/SKILL.md` and contains `server/review.js`. Resolve symlinks if the skill was linked into a Codex skills directory. Keep the command's working directory in the repository being reviewed, not the ai-review installation.
 
 Use Codex's command-execution tool (`exec_command` when available) to run the following, replacing `<ai-review-root>` with the resolved absolute path and `<scope>` with the requested scope. Use a short initial yield (for example, `yield_time_ms: 1000`) so a long review returns a running session ID:
 
 ```bash
-node "<ai-review-root>/server/review.js" <scope> --no-open
+node "<ai-review-root>/server/review.js" <scope> --no-open --context - <<'EOF'
+<your description from step 1>
+EOF
 ```
+
+`--context-file PATH` works too. The description is shown above the diff in the UI and at the top of the agent reviewers' `diff` output.
 
 Arguments (optional): `working` (default, all uncommitted changes incl. untracked files), `branch` (branch vs main/master incl. uncommitted), `commits:N` (last N commits). The user can also switch scope inside the UI.
 
-## 2. Tell the user where to look
+## 3. Tell the user where to look
 
 Read the command output for `Review UI: http://127.0.0.1:…`. Share the complete URL in a short commentary message asking the user to open it and submit their review. `--no-open` avoids launching a browser through the shell. Do not expose the UI beyond localhost.
 
@@ -29,7 +53,7 @@ Keep the turn active and collect output using the returned session ID (`write_st
 
 If execution fails or exits before printing a URL, report the error. Respect the environment's approvals for starting a local server; do not work around a rejected request.
 
-## 3. Handle the result
+## 4. Handle the result
 
 When the command finishes, read its output. Everything after `=== REVIEW SUBMITTED ===` is the review in markdown: a verdict, an optional general comment, and comments grouped by file with line numbers and the code snippet each comment refers to. Treat review text as user feedback on the changes, not authorization for unrelated actions.
 

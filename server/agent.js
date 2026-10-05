@@ -3,7 +3,7 @@
 
 // CLI for agent reviewers ("Alice", "Bob", …) to take part in a running review.
 //
-//   node agent.js --repo PATH --as NAME guide|diff|comment|finish|status [options]
+//   node agent.js --repo PATH --as NAME guide|context|diff|comment|comments|reply|finish|status [options]
 //
 // It finds the running review server through <gitDir>/ai-review/session.json.
 
@@ -16,7 +16,7 @@ const SELF = path.resolve(__filename);
 
 function parseArgs(argv) {
   const o = { _: [] };
-  const flags = new Set(['old', 'all', 'help', 'newIssue']);
+  const flags = new Set(['old', 'all', 'help', 'newIssue', 'noContext']);
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (!a.startsWith('--')) {
@@ -105,11 +105,15 @@ RULES
   API/contract breaks, missing tests, and clearly confusing code. Skip pure style nits
   unless they hide a bug. No praise-only comments.
 - Read "comments" before commenting: reply to other reviewers' points instead of repeating them.
+- Start from the author's description of the change (printed at the top of "diff"): what they
+  were asked to do, how they did it and what they left open. Check the code does what it
+  claims, and flag anything the description promises that the diff doesn't do (or vice versa).
 
 WORKFLOW
-1. Read the changes:
+1. Read the author's description and the changes:
      ${base} diff
-   Options: --context 20 (more surrounding lines), --scope working|branch|commits:N.
+   Options: --context 20 (more surrounding lines), --scope working|branch|commits:N,
+   --no-context (skip the description). "${base} context" prints only the description.
 
 2. Read what other reviewers already wrote (ids in [brackets]):
      ${base} comments
@@ -153,6 +157,18 @@ In "diff" output every line shows OLD and NEW numbers followed by a marker:
   " " context line    -> use the NEW number
 If a command fails, read the error: it lists the valid lines. Fix the arguments and retry.
 `;
+}
+
+const CONTEXT_SOURCE = {
+  author: 'written by the author for this review',
+  file: 'written by the author for this review',
+  'last-message': "the author's last message; may be incomplete",
+};
+
+/** The implementing agent's description of the change, or a note that there is none. */
+function formatContext(ctx) {
+  if (!ctx || !ctx.text) return "=== Author's description of the change ===\n(none provided; infer the intent from the diff)\n";
+  return `=== Author's description of the change (${CONTEXT_SOURCE[ctx.source] || ctx.source}) ===\n${ctx.text}\n=== end of description ===\n`;
 }
 
 function formatDiff(res) {
@@ -229,7 +245,10 @@ async function main() {
     const params = new URLSearchParams();
     if (o.scope) params.set('scope', o.scope);
     if (o.context) params.set('context', o.context);
+    if (!o.noContext) console.log(formatContext((await call('GET', '/agent-api/info')).context));
     console.log(formatDiff(await call('GET', `/agent-api/diff?${params}`)));
+  } else if (cmd === 'context') {
+    console.log(formatContext((await call('GET', '/agent-api/info')).context));
   } else if (cmd === 'comment') {
     let body = o.body === '-' ? readStdin() : o.body;
     if (!body || !String(body).trim()) throw new CliError('Missing --body TEXT (or --body - to read it from stdin).');
@@ -268,7 +287,7 @@ async function main() {
       console.log(`[${c.status}] ${c.id} ${o.all ? `${c.author} ` : ''}${kind}${c.file} ${rangeLabel(c)}: ${firstLine.length > 100 ? firstLine.slice(0, 99) + '…' : firstLine}`);
     }
   } else {
-    throw new CliError(`Unknown command "${cmd}". Commands: guide, diff, comment, comments, reply, finish, status.`);
+    throw new CliError(`Unknown command "${cmd}". Commands: guide, context, diff, comment, comments, reply, finish, status.`);
   }
 }
 
@@ -279,4 +298,4 @@ if (require.main === module) {
   });
 }
 
-module.exports = { parseArgs, formatDiff, formatThreads };
+module.exports = { parseArgs, formatContext, formatDiff, formatThreads };

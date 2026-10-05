@@ -13,7 +13,23 @@ Report the resulting state. When enabled, explain that Codex will check before f
 
 ## Before finishing work while enabled
 
-Run the existing hook as an ordinary command, not as a Codex hook registration:
+First write a description of your uncommitted changes to `<git-dir>/ai-review/context.md` (get the git dir from `git rev-parse --absolute-git-dir`; it differs in worktrees), overwriting any old one, so reviewers see what you were asked to do and why, not just the diff:
+
+```markdown
+## Task
+What the user asked for, in one or two sentences (quote the request if it is short).
+
+## Approach
+How you solved it and why; alternatives you rejected; anything surprising.
+
+## Changes by file
+- `path/to/file`: what changed there and why.
+
+## Not done / open questions
+Known gaps, shortcuts, risks, things you want the reviewer to check. "None" if none.
+```
+
+Then run the existing hook as an ordinary command, not as a Codex hook registration:
 
 ```bash
 AI_REVIEW_NO_OPEN=1 node "<ai-review-root>/server/stop-hook.js" </dev/null

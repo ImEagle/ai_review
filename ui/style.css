@@ -167,6 +167,15 @@ main { flex: 1; min-width: 0; padding: 16px; }
 .st-renamed, .st-copied { color: var(--blue); }
 .cc { font-size: 11px; color: var(--accent); }
 
+/* ---------- author's description ---------- */
+.intent {
+  border: 1px solid var(--border); border-left: 3px solid var(--accent); border-radius: 6px;
+  margin-bottom: 16px; background: var(--bg-subtle);
+}
+.intent summary { padding: 8px 12px; cursor: pointer; font-size: 13px; font-weight: 600; }
+.intent .md { padding: 0 16px 12px; font-size: 14px; max-height: 50vh; overflow: auto; }
+.intent-none { margin: 0 0 16px; font-size: 13px; color: var(--muted); }
+
 /* ---------- previous round ---------- */
 .previous {
   border: 1px solid var(--border); border-radius: 6px; margin-bottom: 16px; background: var(--bg-subtle);

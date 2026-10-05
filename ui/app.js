@@ -209,6 +209,7 @@ async function init() {
 
   S.agents = S.meta.agents || S.agents;
   renderScopeSelect();
+  renderIntent();
   renderPrevious();
   renderReviewers();
   updateInvitePrompt();
@@ -315,6 +316,20 @@ function renderTree() {
     return html + '</ul>';
   };
   $('#tree').innerHTML = renderNode(root);
+}
+
+const INTENT_SOURCE = { author: 'from Claude', file: 'from Claude', 'last-message': "from Claude's last message" };
+
+function renderIntent() {
+  const c = S.meta.context;
+  if (!c || !c.text) {
+    $('#intent').innerHTML = '<p class="intent-none">No description of the change was provided by the author.</p>';
+    return;
+  }
+  $('#intent').innerHTML = `<details class="intent" open>
+    <summary>What changed and why · ${esc(INTENT_SOURCE[c.source] || c.source)}</summary>
+    <div class="md">${md(c.text)}</div>
+  </details>`;
 }
 
 function renderPrevious() {

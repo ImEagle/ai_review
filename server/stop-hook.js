@@ -48,6 +48,7 @@ async function main() {
     cwd: target.root,
     scope: 'working',
     hook: true,
+    hookInput: input,
     open: !process.env.AI_REVIEW_NO_OPEN,
     timeout: parseFloat(process.env.AI_REVIEW_HOOK_TIMEOUT) || 55,
     log: (url) => process.stderr.write(`ai-review: review the changes at ${url}\nai-review: agent reviewers can join with: ${agentPrompt(target.root)}\n`),
@@ -61,7 +62,11 @@ async function main() {
   const { review, markdown } = result;
   if (review.verdict === 'approve') return;
   if (!hasFeedback(review)) return;
-  process.stdout.write(JSON.stringify({ decision: 'block', reason: markdown }));
+  const note =
+    `\n\n---\nBefore you stop again, write a short markdown description of your changes ` +
+    `(Task / Approach / Changes by file / Not done or open questions) to ${state.contextFile(target.gitDir)}, ` +
+    `overwriting it. The reviewers see it above the diff in the next round.\n`;
+  process.stdout.write(JSON.stringify({ decision: 'block', reason: markdown + note }));
 }
 
 if (require.main === module) {

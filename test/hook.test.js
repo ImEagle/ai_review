@@ -55,3 +55,38 @@ test('hook process exits 0 with no output when disabled or outside git', (t) => 
     assert.equal(out, '');
   }
 });
+
+test('hook passes the last assistant message to the UI and tells Claude where to describe changes', async (t) => {
+  const r = tmpRepo();
+  t.after(r.cleanup);
+  r.write('a.txt', 'a\n');
+  r.commit('init');
+  execFileSync('node', [AUTO, 'on'], { cwd: r.dir });
+  r.write('a.txt', 'b\n');
+
+  const { spawn } = require('node:child_process');
+  const child = spawn('node', [HOOK], { env: { ...process.env, AI_REVIEW_NO_OPEN: '1' } });
+  child.stdin.end(JSON.stringify({ cwd: r.dir, last_assistant_message: 'Changed a to b.' }));
+  let stdout = '';
+  let stderr = '';
+  child.stdout.on('data', (d) => (stdout += d));
+  const url = await new Promise((resolve) =>
+    child.stderr.on('data', (d) => {
+      stderr += d;
+      const m = /http:\/\/127\.0\.0\.1:\d+\/\?t=\w+/.exec(stderr);
+      if (m) resolve(m[0]);
+    })
+  );
+  const { origin, searchParams } = new URL(url);
+  const headers = { 'X-Review-Token': searchParams.get('t'), 'Content-Type': 'application/json' };
+  const meta = await (await fetch(`${origin}/api/meta`, { headers })).json();
+  assert.deepEqual(meta.context, { text: 'Changed a to b.', source: 'last-message' });
+
+  const comment = { id: '1', file: 'a.txt', side: 'new', start: 1, end: 1, snippet: ['b'], body: 'Why?' };
+  await fetch(`${origin}/api/submit`, { method: 'POST', headers, body: JSON.stringify({ verdict: 'comment', comments: [comment] }) });
+  await new Promise((resolve) => child.on('close', resolve));
+  const out = JSON.parse(stdout);
+  assert.equal(out.decision, 'block');
+  assert.match(out.reason, /Why\?/);
+  assert.ok(out.reason.includes(state.contextFile(gitlib.gitDir(r.dir))));
+});

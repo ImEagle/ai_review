@@ -52,16 +52,33 @@ function lastHistory(gitDir) {
   return readJson(path.join(dir, files[files.length - 1]), null);
 }
 
+const lastReviewedFile = (gitDir) => path.join(stateDir(gitDir), 'last-reviewed');
+
 function readLastReviewedHash(gitDir) {
   try {
-    return fs.readFileSync(path.join(stateDir(gitDir), 'last-reviewed'), 'utf8').trim();
+    return fs.readFileSync(lastReviewedFile(gitDir), 'utf8').trim();
   } catch {
     return null;
   }
 }
 
 function writeLastReviewedHash(gitDir, hash) {
-  fs.writeFileSync(path.join(stateDir(gitDir), 'last-reviewed'), hash + '\n');
+  fs.writeFileSync(lastReviewedFile(gitDir), hash + '\n');
+}
+
+// context.md: the implementing agent's description of the change, for reviewers.
+const contextFile = (gitDir) => path.join(stateDir(gitDir), 'context.md');
+
+function readContextFile(gitDir) {
+  try {
+    return fs.readFileSync(contextFile(gitDir), 'utf8');
+  } catch {
+    return '';
+  }
+}
+
+function clearContextFile(gitDir) {
+  fs.rmSync(contextFile(gitDir), { force: true });
 }
 
 // Agent reviewers' comments are kept apart from the user's draft so the UI's
@@ -109,4 +126,8 @@ module.exports = {
   lastHistory,
   readLastReviewedHash,
   writeLastReviewedHash,
+  lastReviewedFile,
+  contextFile,
+  readContextFile,
+  clearContextFile,
 };
